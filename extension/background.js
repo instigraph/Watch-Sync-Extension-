@@ -72,22 +72,25 @@ async function sendToOffscreenWithRetry(message, retries = 5, delay = 100) {
 }
 
 async function getActiveTab() {
-  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  return tabs[0] || null;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab) return tab;
+  const [lastFocused] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (lastFocused) return lastFocused;
+  const [anyActive] = await chrome.tabs.query({ active: true });
+  return anyActive || null;
 }
 
 async function applyToSyncedTab(state) {
   const tab = syncedTabId ? { id: syncedTabId } : await getActiveTab();
   if (!tab || !tab.id) return;
+
   chrome.tabs.sendMessage(tab.id, { type: "remote_state", payload: state }).catch(() => {
-    if (syncedTabId) {
-      syncedTabId = null;
-      getActiveTab().then((activeTab) => {
-        if (activeTab && activeTab.id) {
-          chrome.tabs.sendMessage(activeTab.id, { type: "remote_state", payload: state }).catch(() => {});
-        }
-      });
-    }
+    getActiveTab().then((activeTab) => {
+      if (activeTab && activeTab.id) {
+        syncedTabId = activeTab.id;
+        chrome.tabs.sendMessage(activeTab.id, { type: "remote_state", payload: state }).catch(() => {});
+      }
+    });
   });
 }
 
@@ -96,7 +99,10 @@ async function navigateSyncedTab(url, pendingState) {
   if (!tab || !tab.id) return;
   syncedTabId = tab.id;
 
-  if (tab.url === url) return;
+  if (tab.url === url) {
+    if (pendingState) applyToSyncedTab(pendingState);
+    return;
+  }
 
   const listener = (tabId, changeInfo) => {
     if (tabId === tab.id && changeInfo.status === "complete") {
@@ -109,25 +115,44 @@ async function navigateSyncedTab(url, pendingState) {
 }
 
 function applyOnceReady(tabId, state) {
-  setTimeout(() => {
-    chrome.tabs.sendMessage(tabId, { type: "remote_state", payload: state }).catch(() => {});
-  }, 1500);
+  let retries = 0;
+  const interval = setInterval(() => {
+    chrome.tabs.sendMessage(tabId, { type: "remote_state", payload: state })
+      .then(() => clearInterval(interval))
+      .catch(() => {
+        retries++;
+        if (retries >= 8) clearInterval(interval);
+      });
+  }, 350);
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Fix 1: Forward local_state from content.js directly to offscreen document
   if (message.type === "local_state") {
     if (sender.tab) syncedTabId = sender.tab.id;
+    (async () => {
+      if (await hasOffscreenDocument()) {
+        sendToOffscreenWithRetry({
+          target: "offscreen",
+          type: "local_state",
+          payload: message,
+          ...message
+        }).catch(() => {});
+      }
+    })();
     return;
   }
-if (message.type === "tabs_trigger_control") {
-  (async () => {
-    const tab = syncedTabId ? { id: syncedTabId } : await getActiveTab();
-    if (tab && tab.id) {
-      chrome.tabs.sendMessage(tab.id, { type: "trigger_control", action: message.action }).catch(() => {});
-    }
-  })();
-  return;
-}
+
+  if (message.type === "tabs_trigger_control") {
+    (async () => {
+      const tab = syncedTabId ? { id: syncedTabId } : await getActiveTab();
+      if (tab && tab.id) {
+        chrome.tabs.sendMessage(tab.id, { type: "trigger_control", action: message.action }).catch(() => {});
+      }
+    })();
+    return;
+  }
+
   if (message.target === "background") {
     if (message.type === "clear_session") {
       chrome.storage.local.remove(["roomCode", "role"]);
@@ -147,6 +172,7 @@ if (message.type === "tabs_trigger_control") {
           sendResponse({ url: null, state: null });
           return;
         }
+        syncedTabId = tab.id;
         let state = null;
         try {
           state = await chrome.tabs.sendMessage(tab.id, { type: "get_current_state" });

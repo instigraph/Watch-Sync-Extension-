@@ -4,103 +4,303 @@
   <meta charset="UTF-8" />
   <title>WatchSync</title>
   <style>
-    body {
-      font-family: -apple-system, Segoe UI, Roboto, sans-serif;
-      width: 260px;
-      padding: 16px;
-      margin: 0;
-    }
-    h1 { font-size: 15px; margin: 0 0 12px; }
-    .status { font-size: 12px; color: #666; margin-bottom: 12px; }
-    .status.connected { color: #1a7f37; }
-    .status.error { color: #dc2626; }
-    button {
-      width: 100%;
-      padding: 8px;
-      margin-bottom: 8px;
-      border: none;
-      border-radius: 6px;
-      background: #2563eb;
-      color: white;
-      font-size: 13px;
-      cursor: pointer;
-    }
-    button.secondary { background: #eee; color: #333; }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
-    input {
-      width: 100%;
+    * {
       box-sizing: border-box;
-      padding: 8px;
-      margin-bottom: 8px;
-      border: 1px solid #ccc;
-      border-radius: 6px;
-      font-size: 14px;
-      letter-spacing: 2px;
-      text-align: center;
+      margin: 0;
+      padding: 0;
     }
+
+    /* Make top-level document transparent so rounded container clips cleanly */
+    html, body {
+      background: transparent;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    /* Rounded Popup Card Container */
+    .container {
+      width: 310px;
+      padding: 20px;
+      background-color: #ffffff;
+      border-radius: 24px;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+      color: #000000;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Header */
+    .header {
+      margin-bottom: 16px;
+    }
+
+    .title {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.4px;
+      color: #000000;
+      margin-bottom: 4px;
+    }
+
+    .status {
+      font-size: 14px;
+      font-weight: 600;
+      color: #8e8e93;
+    }
+    .status.connected { color: #34c759; }
+    .status.error { color: #ff3b30; }
+
+    /* Room Code Box */
     .code-display {
-      font-size: 28px;
-      letter-spacing: 4px;
+      background-color: #f2f2f7;
+      border-radius: 22px;
+      padding: 18px 0;
       text-align: center;
-      font-weight: bold;
-      padding: 12px 0;
-      background: #f3f4f6;
-      border-radius: 8px;
+      font-size: 40px;
+      font-weight: 800;
+      letter-spacing: 3px;
+      color: #1c1c1e;
+      margin-bottom: 22px;
+    }
+
+    /* Section Headers */
+    .section-label {
+      font-size: 14px;
+      font-weight: 700;
+      color: #8e8e93;
       margin-bottom: 10px;
     }
+
+    /* Single-Row Playback Controls */
     .controls-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
-      margin: 10px 0;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 24px;
     }
+
     .ctrl-btn {
-      padding: 8px 6px;
-      margin-bottom: 0;
-      font-size: 12px;
-      font-weight: 500;
+      height: 52px;
+      border: none;
+      border-radius: 18px;
+      background-color: #222222;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: opacity 0.15s ease, transform 0.1s ease;
     }
-    .ctrl-btn.primary {
-      grid-column: span 2;
+
+    .ctrl-btn:hover {
+      opacity: 0.88;
+    }
+
+    .ctrl-btn:active {
+      transform: scale(0.96);
+      opacity: 0.75;
+    }
+
+    .ctrl-btn svg {
+      width: 22px;
+      height: 22px;
+      fill: #ffffff;
+    }
+
+    /* Full-width Black Pill Buttons */
+    .btn-dark {
+      width: 100%;
+      height: 52px;
+      border: none;
+      border-radius: 26px;
+      background-color: #222222;
+      color: #ffffff;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.15s ease, transform 0.1s ease;
+    }
+
+    .btn-dark:hover {
+      opacity: 0.88;
+    }
+
+    .btn-dark:active {
+      transform: scale(0.98);
+    }
+
+    /* URL Input Capsule with Embedded Send Button */
+    .url-input-container {
+      display: flex;
+      align-items: center;
+      background-color: #f2f2f7;
+      border-radius: 26px;
+      padding: 4px 5px 4px 18px;
+      margin-bottom: 22px;
+      height: 52px;
+    }
+
+    .url-input-container input {
+      flex: 1;
+      border: none;
+      background: transparent;
+      font-size: 15px;
+      font-weight: 500;
+      color: #000000;
+      outline: none;
+      width: 100%;
+    }
+
+    .url-input-container input::placeholder {
+      color: #8e8e93;
+    }
+
+    .send-btn {
+      height: 44px;
+      padding: 0 22px;
+      border: none;
+      border-radius: 22px;
+      background-color: #222222;
+      color: #ffffff;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s ease, transform 0.1s ease;
+    }
+
+    .send-btn:hover {
+      opacity: 0.88;
+    }
+
+    .send-btn:active {
+      transform: scale(0.96);
+    }
+
+    /* General Input styling for Pairing View */
+    .pairing-input {
+      width: 100%;
+      height: 52px;
+      border: 1.5px solid #e5e5ea;
+      border-radius: 26px;
+      padding: 0 18px;
+      font-size: 16px;
+      font-weight: 600;
+      text-align: center;
+      background-color: #f2f2f7;
+      color: #000000;
+      outline: none;
+      margin-bottom: 12px;
+      letter-spacing: 2px;
+    }
+
+    /* Footer Text */
+    .shortcuts-text {
+      font-size: 12px;
+      font-weight: 700;
+      color: #8e8e93;
+      line-height: 1.35;
+      margin-bottom: 10px;
+    }
+
+    .host-warning {
+      font-size: 12px;
+      font-weight: 700;
+      color: #ff9500;
+      line-height: 1.35;
+      margin-bottom: 16px;
+    }
+
+    /* Coral/Red Leave Button */
+    .leave-btn {
+      width: 100%;
+      height: 52px;
+      border: none;
+      border-radius: 26px;
+      background-color: #ff7b7b;
+      color: #1c1c1e;
+      font-size: 17px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s ease, transform 0.1s ease;
+    }
+
+    .leave-btn:hover {
+      opacity: 0.9;
+    }
+
+    .leave-btn:active {
+      transform: scale(0.98);
+      opacity: 0.8;
     }
   </style>
 </head>
 <body>
-  <h1>WatchSync</h1>
-  <div id="status" class="status">Not connected</div>
-  
-  <div id="roomView" style="display:none;">
-    <div class="code-display" id="roomCode"></div>
-    
-    <div class="controls-grid">
-      <button id="ctrlPlayPauseBtn" class="ctrl-btn primary">⏯️ Play / Pause</button>
-      <button id="ctrlBack10Btn" class="ctrl-btn secondary">⏪ -10s</button>
-      <button id="ctrlFwd10Btn" class="ctrl-btn secondary">+10s ⏩</button>
-      <button id="ctrlMuteBtn" class="ctrl-btn secondary">🔇 Mute</button>
+
+  <div class="container">
+    <div class="header">
+      <div class="title">WatchSync</div>
+      <div id="status" class="status">Hosting - waiting for peer</div>
     </div>
 
-    <hr style="border:none;border-top:1px solid #eee;margin:10px 0;" />
-    
-    <div style="font-size:12px;color:#666;margin-bottom:6px;">Common stream</div>
-    <button class="secondary" id="useCurrentTabBtn">Sync Room to This Tab</button>
-    <input id="streamUrlInput" style="letter-spacing:normal;text-align:left;" placeholder="or paste a URL" />
-    <button id="setStreamBtn">Send URL to Room</button>
-    
-    <div style="font-size:11px;color:#999;margin:6px 0 10px;">
-      Shortcuts: Alt+Shift+P play/pause · Alt+Shift+← / → seek 10s
+    <!-- Room Control View -->
+    <div id="roomView">
+      <div class="code-display" id="roomCode">220579</div>
+
+      <div class="section-label">Playback Controls</div>
+      <div class="controls-grid">
+        <!-- Rewind (<<) -->
+        <button id="ctrlBack10Btn" class="ctrl-btn" title="Rewind">
+          <svg viewBox="0 0 24 24"><path d="M11 18V6l-8.5 6L11 18zm9.5 0V6l-8.5 6 8.5 6z"/></svg>
+        </button>
+
+        <!-- Play / Pause (▶) -->
+        <button id="ctrlPlayPauseBtn" class="ctrl-btn" title="Play / Pause">
+          <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+
+        <!-- Fast Forward (>>) -->
+        <button id="ctrlFwd10Btn" class="ctrl-btn" title="Fast Forward">
+          <svg viewBox="0 0 24 24"><path d="M3.5 18V6l8.5 6-8.5 6zm9.5 0V6l8.5 6-8.5 6z"/></svg>
+        </button>
+
+        <!-- Mute (Speaker + X) -->
+        <button id="ctrlMuteBtn" class="ctrl-btn" title="Mute / Unmute">
+          <svg viewBox="0 0 24 24"><path d="M3 9v6h3.8L11 19.2V4.8L6.8 9H3zm11.71 1.29a1 1 0 0 0-1.42 1.42L14.59 13l-1.3 1.29a1 1 0 1 0 1.42 1.42l1.29-1.3 1.29 1.3a1 1 0 0 0 1.42-1.42L17.41 13l1.3-1.29a1 1 0 0 0-1.42-1.42L16 11.59l-1.29-1.3z"/></svg>
+        </button>
+      </div>
+
+      <div class="section-label">Room Content</div>
+      <button class="btn-dark" id="useCurrentTabBtn">Sync Room to This Tab</button>
+
+      <div class="url-input-container">
+        <input id="streamUrlInput" placeholder="or paste a URL" />
+        <button id="setStreamBtn" class="send-btn">Send</button>
+      </div>
+
+      <div class="shortcuts-text">
+        Shortcuts: Alt+Shift+P play/pause &nbsp;Alt+Shift+ &larr;/&rarr; to seek 10s
+      </div>
+
+      <div id="hostWarning" class="host-warning">
+        You’re hosting - leaving or closing this browser ends the room for everyone.
+      </div>
+
+      <button id="leaveBtn" class="leave-btn">Leave Room</button>
     </div>
-    <div id="hostWarning" style="font-size:11px;color:#b45309;margin-bottom:8px;display:none;">
-      You're hosting — leaving or closing this browser ends the room for everyone.
+
+    <!-- Initial / Pairing View -->
+    <div id="pairView" style="display:none;">
+      <button id="createBtn" class="btn-dark">Create Room</button>
+      <input id="joinInput" class="pairing-input" placeholder="Enter 6-digit code" maxlength="6" />
+      <button id="joinBtn" class="btn-dark">Join Room</button>
     </div>
-    <button class="secondary" id="leaveBtn">Leave Room</button>
   </div>
 
-  <div id="pairView">
-    <button id="createBtn">Create Room</button>
-    <input id="joinInput" placeholder="Enter 6-digit code" maxlength="6" />
-    <button id="joinBtn" class="secondary">Join Room</button>
-  </div>
-  
   <script src="popup.js"></script>
 </body>
 </html>
