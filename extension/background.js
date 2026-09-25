@@ -1,15 +1,9 @@
 // background.js
-// Offscreen documents can ONLY use chrome.runtime (for messaging) — not
-// chrome.storage, not chrome.tabs, not anything else. (This is a hard
-// Chrome platform restriction, not a permissions issue — see
-// https://developer.chrome.com/docs/extensions/reference/api/offscreen :
-// "The runtime API is the only extensions API supported by offscreen
-// documents.") So this file owns ALL storage and tab access, and acts as
-// a proxy: offscreen.js sends it request messages (target: "background")
-// whenever it needs to read/write storage or touch a tab, and this file
-// does the actual chrome.storage.*/chrome.tabs.* call on its behalf.
+// Owns storage, tab access, offscreen document lifecycle, and message routing.
 
 const OFFSCREEN_PATH = "offscreen.html";
+const SIGNAL_SERVER_URL = "wss://watchsync-server-vvcc.onrender.com";
+
 const PAIRING_MESSAGE_TYPES = new Set([
   "create_room",
   "join_room",
@@ -18,7 +12,14 @@ const PAIRING_MESSAGE_TYPES = new Set([
   "get_status"
 ]);
 
-let syncedTabId = null; // the tab we treat as "the" synced player
+let syncedTabId = null; // The tab treated as the synced player
+
+// Clean up stale tab IDs when tabs are closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === syncedTabId) {
+    syncedTabId = null;
+  }
+});
 
 restoreIfNeeded();
 chrome.runtime.onStartup.addListener(restoreIfNeeded);
@@ -28,12 +29,13 @@ async function restoreIfNeeded() {
   if (!stored.roomCode || !stored.role) return;
   const deviceId = await getOrCreateDeviceId();
   await ensureOffscreenDocument();
-  await chrome.runtime.sendMessage({
+  await sendToOffscreenWithRetry({
     target: "offscreen",
     type: "begin",
     roomCode: stored.roomCode,
     role: stored.role,
-    deviceId
+    deviceId,
+    serverUrl: SIGNAL_SERVER_URL
   });
 }
 
@@ -63,8 +65,19 @@ async function ensureOffscreenDocument() {
   });
 }
 
-// ---- Tab control (the actual implementation; offscreen.js only ever asks
-// for this via message, since it has no chrome.tabs access itself) ----
+// Retries messaging offscreen script to prevent race conditions during document spin-up
+async function sendToOffscreenWithRetry(message, retries = 5, delay = 100) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await chrome.runtime.sendMessage(message);
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
+// ---- Tab Control ----
 
 async function getActiveTab() {
   const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
@@ -74,7 +87,17 @@ async function getActiveTab() {
 async function applyToSyncedTab(state) {
   const tab = syncedTabId ? { id: syncedTabId } : await getActiveTab();
   if (!tab || !tab.id) return;
-  chrome.tabs.sendMessage(tab.id, { type: "remote_state", payload: state }).catch(() => {});
+  chrome.tabs.sendMessage(tab.id, { type: "remote_state", payload: state }).catch(() => {
+    // Fall back to active tab if sending to syncedTabId failed
+    if (syncedTabId) {
+      syncedTabId = null;
+      getActiveTab().then((activeTab) => {
+        if (activeTab && activeTab.id) {
+          chrome.tabs.sendMessage(activeTab.id, { type: "remote_state", payload: state }).catch(() => {});
+        }
+      });
+    }
+  });
 }
 
 async function navigateSyncedTab(url, pendingState) {
@@ -83,9 +106,6 @@ async function navigateSyncedTab(url, pendingState) {
   syncedTabId = tab.id;
 
   if (tab.url === url) {
-    // This tab is already showing that content — it's presumably the
-    // source of the state we'd otherwise be "catching it up" to, so
-    // there's nothing to apply here.
     return;
   }
 
@@ -105,19 +125,14 @@ function applyOnceReady(tabId, state) {
   }, 1500);
 }
 
-// ---- Message routing ----
+// ---- Message Routing ----
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // From content.js: just track which tab is "the" synced player. The
-  // actual relay of this event happens in offscreen.js, which also
-  // receives this same broadcast directly (message passing works fine
-  // there — it's storage/tabs specifically that don't).
   if (message.type === "local_state") {
     if (sender.tab) syncedTabId = sender.tab.id;
     return;
   }
 
-  // From offscreen.js: proxied storage/tabs requests it can't make itself.
   if (message.target === "background") {
     if (message.type === "tabs_get_active_url") {
       (async () => {
@@ -137,7 +152,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         try {
           state = await chrome.tabs.sendMessage(tab.id, { type: "get_current_state" });
         } catch {
-          // content script not present/ready on this tab — proceed without state
+          // Content script not ready on this tab
         }
         sendResponse({ url: tab.url, state: state || null });
       })();
@@ -160,7 +175,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
 
-  // From popup.js
   if (PAIRING_MESSAGE_TYPES.has(message.type)) {
     (async () => {
       if (message.type === "create_room") {
@@ -168,7 +182,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const roomCode = generateRoomCode();
         await chrome.storage.local.set({ roomCode, role: "host" });
         await ensureOffscreenDocument();
-        await chrome.runtime.sendMessage({ target: "offscreen", type: "begin", roomCode, role: "host", deviceId });
+        await sendToOffscreenWithRetry({
+          target: "offscreen",
+          type: "begin",
+          roomCode,
+          role: "host",
+          deviceId,
+          serverUrl: SIGNAL_SERVER_URL
+        });
         sendResponse({ roomCode });
         return;
       }
@@ -178,7 +199,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const roomCode = message.roomCode;
         await chrome.storage.local.set({ roomCode, role: "peer" });
         await ensureOffscreenDocument();
-        await chrome.runtime.sendMessage({ target: "offscreen", type: "begin", roomCode, role: "peer", deviceId });
+        await sendToOffscreenWithRetry({
+          target: "offscreen",
+          type: "begin",
+          roomCode,
+          role: "peer",
+          deviceId,
+          serverUrl: SIGNAL_SERVER_URL
+        });
         sendResponse({ ok: true });
         return;
       }
@@ -186,14 +214,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.type === "leave_room") {
         await chrome.storage.local.remove(["roomCode", "role"]);
         if (await hasOffscreenDocument()) {
-          await chrome.runtime.sendMessage({ target: "offscreen", type: "stop" });
+          await sendToOffscreenWithRetry({ target: "offscreen", type: "stop" });
         }
         sendResponse({ ok: true });
         return;
       }
 
-      // set_stream / get_status: no point spinning up an offscreen document
-      // just to answer these if one doesn't already exist (no active room).
       if (!(await hasOffscreenDocument())) {
         sendResponse(
           message.type === "get_status"
@@ -202,17 +228,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         );
         return;
       }
-      const res = await chrome.runtime.sendMessage({ ...message, target: "offscreen" });
+      const res = await sendToOffscreenWithRetry({ ...message, target: "offscreen" });
       sendResponse(res);
     })();
-    return true; // keep the message channel open for the async response
+    return true;
   }
 });
 
-// Global keyboard shortcuts (see manifest.json "commands"). These act
-// directly on whatever tab is currently focused — no relay/offscreen
-// involvement needed, since the resulting native video event flows through
-// the normal local_state reporting path in content.js -> offscreen.js.
 chrome.commands.onCommand.addListener(async (command) => {
   const tab = await getActiveTab();
   if (!tab || !tab.id) return;
