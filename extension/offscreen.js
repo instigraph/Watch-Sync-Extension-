@@ -1,32 +1,17 @@
 // offscreen.js
 // Lives inside the extension's offscreen document because
 // RTCPeerConnection isn't available in a service worker. Offscreen
-// documents can ONLY use chrome.runtime (messaging) — no chrome.storage,
-// no chrome.tabs, nothing else. So every storage/tab operation below is
-// actually a message to background.js, which performs it and (for the ones
-// that need an answer) replies via sendResponse.
+// documents can ONLY use chrome.runtime (messaging).
 //
 //   - The device that creates a room is the "host". It keeps one
-//     RTCPeerConnection + data channel open per joined peer, and acts as
-//     the hub: any state/set_stream message it receives from one peer gets
-//     relayed to every other peer over their own data channels, and
-//     applied to the host's own tab. The host also holds the only copy of
-//     "what's playing" (streamUrl / lastState) — nothing is persisted on
-//     the signaling server.
-//   - A "peer" holds exactly one RTCPeerConnection, to the host. It sends
-//     its local state to the host and applies whatever the host sends back.
+//     RTCPeerConnection + data channel open per joined peer.
+//   - A "peer" holds exactly one RTCPeerConnection, to the host.
 //
-// The signaling server (signaling-server/server.js) only ever sees the SDP
-// offer/answer/ICE-candidate exchange needed to establish these
-// connections — no playback data passes through it.
+// The signaling server only handles the SDP offer/answer/ICE exchange.
 
-const SIGNAL_URL = "ws://localhost:8080"; // <-- set to your deployed signaling server
+let signalUrl = "wss://watchsync-server-vvcc.onrender.com"; // Fallback production URL
 const ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" }
-  // Optional TURN fallback for networks where direct P2P can't establish
-  // (symmetric NATs, some corporate/mobile networks). Without one, those
-  // pairings simply won't connect. Add your own if you hit this:
-  // { urls: "turn:your-turn-server:3478", username: "...", credential: "..." }
 ];
 
 let ws = null;
@@ -46,15 +31,11 @@ let hostPc = null;
 let hostChannel = null;
 let peerPendingCandidates = [];
 
-// background.js tells us when to start (fresh create/join, or restoring
-// after a browser restart) via a "begin" message — we don't read storage
-// ourselves, since we can't.
-
 // ---- Signaling ----
 
 function connectSignaling() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-  ws = new WebSocket(SIGNAL_URL);
+  ws = new WebSocket(signalUrl);
 
   ws.onopen = () => {
     ws.send(JSON.stringify({ type: "join", room: roomCode, deviceId, role }));
@@ -153,11 +134,6 @@ function setupHostChannel(peerId, channel) {
   channels.set(peerId, channel);
   channel.onopen = () => {
     notifyStatus();
-    // Catch the new peer up on what the room's already doing. lastState may
-    // itself be a "heartbeat" (drift-only, not a play/pause instruction) —
-    // normalize it to an actual play command for this purpose, since a
-    // fresh joiner's video is paused by default and needs to be told to
-    // actually start.
     channel.send(JSON.stringify({ type: "room_info", url: streamUrl, lastState: toCatchupState(lastState) }));
   };
   channel.onmessage = (e) => handleHostChannelMessage(peerId, e.data);
@@ -256,8 +232,7 @@ function handlePeerChannelMessage(raw) {
   }
 }
 
-// ---- Tab control: proxied through background.js, which is the only
-// context here with actual chrome.tabs access. ----
+// ---- Tab Control via Background ----
 
 function applyToTab(state) {
   chrome.runtime.sendMessage({ target: "background", type: "tabs_apply_state", payload: state }).catch(() => {});
@@ -319,13 +294,10 @@ function notifyStatus(reason) {
   chrome.runtime.sendMessage({ type: "status", reason }).catch(() => {});
 }
 
-// ---- Messages from content scripts (direct) and background (routed from popup) ----
+// ---- Message Handlers ----
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "local_state") {
-    // Just message metadata (sender.tab), not a chrome.tabs API call — this
-    // works fine in an offscreen document, unlike actually calling
-    // chrome.tabs.* directly.
     const payload = JSON.stringify({
       type: "state",
       deviceId,
@@ -349,6 +321,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     roomCode = message.roomCode;
     role = message.role;
     deviceId = message.deviceId;
+    if (message.serverUrl) {
+      signalUrl = message.serverUrl;
+    }
     connectSignaling();
     sendResponse({ ok: true });
     return;
@@ -366,9 +341,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       let capturedState = null;
 
       if (!url) {
-        // "Sync Room to This Tab" — no URL given means use the current tab,
-        // and critically, also grab its exact playback position so everyone
-        // else starts (or jumps to) the same spot instead of 0:00.
         const res = await getActiveTabUrlAndState();
         url = res.url;
         capturedState = res.state;
