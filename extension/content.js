@@ -125,21 +125,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === "trigger_control") {
-    const video = findBestVideo();
-    if (!video) return;
-    attachVideoListeners(video);
+// Update the trigger_control handler in content.js
+if (message.type === "trigger_control") {
+  const video = findBestVideo();
+  if (!video) return;
+  attachVideoListeners(video);
 
-    if (message.action === "toggle") {
-      if (video.paused) video.play();
-      else video.pause();
-    } else if (message.action === "seek_forward") {
-      video.currentTime += 10;
-    } else if (message.action === "seek_back") {
-      video.currentTime -= 10;
-    }
-    return;
+  if (message.action === "toggle") {
+    if (video.paused) video.play();
+    else video.pause();
+  } else if (message.action === "seek_forward") {
+    video.currentTime += 10;
+  } else if (message.action === "seek_back") {
+    video.currentTime -= 10;
+  } else if (message.action === "toggle_mute") {
+    video.muted = !video.muted;
   }
+  return;
+}
 });
 
 // Observe DOM changes to attach listeners to dynamic single-page app players (e.g., YouTube, Netflix)

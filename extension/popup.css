@@ -1,0 +1,32 @@
+.controls-bar {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.btn-ctrl {
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background-color: #f8f9fa;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn-ctrl:hover {
+  background-color: #e9ecef;
+}
+
+.btn-ctrl.primary {
+  grid-column: span 2;
+  background-color: #0d6efd;
+  color: #ffffff;
+  border: none;
+}
+
+.btn-ctrl.primary:hover {
+  background-color: #0b5ed7;
+}

@@ -77,6 +77,16 @@ document.getElementById("setStreamBtn").addEventListener("click", async () => {
   flashStreamStatus(res?.ok);
 });
 
+// Playback Control Handlers
+document.getElementById("ctrlPlayPauseBtn")?.addEventListener("click", () => sendControl("toggle"));
+document.getElementById("ctrlBack10Btn")?.addEventListener("click", () => sendControl("seek_back"));
+document.getElementById("ctrlFwd10Btn")?.addEventListener("click", () => sendControl("seek_forward"));
+document.getElementById("ctrlMuteBtn")?.addEventListener("click", () => sendControl("toggle_mute"));
+
+function sendControl(action) {
+  chrome.runtime.sendMessage({ target: "background", type: "tabs_trigger_control", action });
+}
+
 function flashStreamStatus(ok) {
   statusEl.textContent = ok ? "Stream sent to room" : "Couldn't send stream";
   statusEl.className = ok ? "status connected" : "status error";

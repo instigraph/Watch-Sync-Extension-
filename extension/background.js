@@ -119,7 +119,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (sender.tab) syncedTabId = sender.tab.id;
     return;
   }
-
+if (message.type === "tabs_trigger_control") {
+  (async () => {
+    const tab = syncedTabId ? { id: syncedTabId } : await getActiveTab();
+    if (tab && tab.id) {
+      chrome.tabs.sendMessage(tab.id, { type: "trigger_control", action: message.action }).catch(() => {});
+    }
+  })();
+  return;
+}
   if (message.target === "background") {
     if (message.type === "clear_session") {
       chrome.storage.local.remove(["roomCode", "role"]);
