@@ -1,8 +1,20 @@
 // WatchSync production signaling server
+const http = require("http");
 const WebSocket = require("ws");
 
 const PORT = process.env.PORT || 8080;
-const wss = new WebSocket.Server({ port: PORT });
+
+// Create HTTP server for health checks & wake-up pings
+const server = http.createServer((req, res) => {
+  res.writeHead(200, {
+    "Content-Type": "text/plain",
+    "Access-Control-Allow-Origin": "*"
+  });
+  res.end("WatchSync Signaling Server is active");
+});
+
+// Attach WebSocket server to the HTTP server
+const wss = new WebSocket.Server({ server });
 
 // roomCode -> { host: WebSocket|null, peers: Map<deviceId, WebSocket> }
 const rooms = new Map();
@@ -85,4 +97,7 @@ function send(ws, msg) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
-console.log(`WatchSync signaling server running on port ${PORT}`);
+// Bind server explicitly to 0.0.0.0
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`WatchSync signaling server running on port ${PORT}`);
+});
