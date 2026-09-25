@@ -1,10 +1,9 @@
-// WatchSync production signaling server
+// signaling-server/server.js
 const http = require("http");
 const WebSocket = require("ws");
 
 const PORT = process.env.PORT || 8080;
 
-// Create HTTP server for health checks & wake-up pings
 const server = http.createServer((req, res) => {
   res.writeHead(200, {
     "Content-Type": "text/plain",
@@ -13,7 +12,6 @@ const server = http.createServer((req, res) => {
   res.end("WatchSync Signaling Server is active");
 });
 
-// Attach WebSocket server to the HTTP server
 const wss = new WebSocket.Server({ server });
 
 // roomCode -> { host: WebSocket|null, peers: Map<deviceId, WebSocket> }
@@ -24,7 +22,6 @@ function getRoom(code) {
   return rooms.get(code);
 }
 
-// Keep-alive heartbeat (30s interval) to prevent cloud platform disconnects
 const interval = setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) return ws.terminate();
@@ -51,19 +48,23 @@ wss.on("connection", (ws) => {
       ws.room = msg.room;
       ws.deviceId = msg.deviceId;
       ws.role = msg.role; // "host" | "peer"
-      const room = getRoom(msg.room);
 
       if (msg.role === "host") {
+        const room = getRoom(msg.room);
         room.host = ws;
+        send(ws, { type: "host_registered" });
         return;
       }
 
-      // peer
-      if (!room.host) {
+      // Peer validation: Check if room exists AND host is connected
+      if (!rooms.has(msg.room) || !rooms.get(msg.room).host) {
         send(ws, { type: "no_host" });
         return;
       }
+
+      const room = rooms.get(msg.room);
       room.peers.set(msg.deviceId, ws);
+      send(ws, { type: "join_success" });
       send(room.host, { type: "peer_wants_join", from: msg.deviceId });
       return;
     }
@@ -85,7 +86,7 @@ wss.on("connection", (ws) => {
 
     if (ws.role === "host") {
       for (const peer of room.peers.values()) send(peer, { type: "host_left" });
-      rooms.delete(ws.room);
+      rooms.delete(ws.room); // Remove room when host leaves
     } else if (ws.role === "peer") {
       room.peers.delete(ws.deviceId);
       if (room.host) send(room.host, { type: "peer_disconnected", from: ws.deviceId });
@@ -97,7 +98,6 @@ function send(ws, msg) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
-// Bind server explicitly to 0.0.0.0
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`WatchSync signaling server running on port ${PORT}`);
 });

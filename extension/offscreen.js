@@ -1,60 +1,91 @@
-// offscreen.js
-// Lives inside the extension's offscreen document because
-// RTCPeerConnection isn't available in a service worker. Offscreen
-// documents can ONLY use chrome.runtime (messaging).
-//
-//   - The device that creates a room is the "host". It keeps one
-//     RTCPeerConnection + data channel open per joined peer.
-//   - A "peer" holds exactly one RTCPeerConnection, to the host.
-//
-// The signaling server only handles the SDP offer/answer/ICE exchange.
-
-let signalUrl = "wss://watchsync-server-vvcc.onrender.com"; // Fallback production URL
-const ICE_SERVERS = [
-  { urls: "stun:stun.l.google.com:19302" }
-];
+// extension/offscreen.js
+let signalUrl = "wss://watchsync-server-vvcc.onrender.com";
+const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 
 let ws = null;
 let deviceId = null;
 let roomCode = null;
 let role = null; // "host" | "peer"
 
-// Host-only state
-let pcs = new Map(); // peerId -> RTCPeerConnection
-let channels = new Map(); // peerId -> RTCDataChannel
-let pendingCandidates = new Map(); // peerId -> queued ICE candidates
+let pcs = new Map();
+let channels = new Map();
+let pendingCandidates = new Map();
 let streamUrl = null;
 let lastState = null;
 
-// Peer-only state
 let hostPc = null;
 let hostChannel = null;
 let peerPendingCandidates = [];
 
-// ---- Signaling ----
-
 function connectSignaling() {
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-  ws = new WebSocket(signalUrl);
-
-  ws.onopen = () => {
-    ws.send(JSON.stringify({ type: "join", room: roomCode, deviceId, role }));
-    notifyStatus();
-  };
-  ws.onmessage = (e) => {
-    let msg;
-    try {
-      msg = JSON.parse(e.data);
-    } catch {
-      return;
+  return new Promise((resolve, reject) => {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      try { ws.close(); } catch {}
     }
-    handleSignal(msg);
-  };
-  ws.onclose = () => {
-    notifyStatus();
-    if (roomCode) setTimeout(connectSignaling, 2000);
-  };
-  ws.onerror = () => {};
+
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        teardown();
+        reject(new Error("Connection to signaling server timed out."));
+      }
+    }, 12000);
+
+    ws = new WebSocket(signalUrl);
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: "join", room: roomCode, deviceId, role }));
+      notifyStatus();
+      if (role === "host") {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve();
+        }
+      }
+    };
+
+    ws.onmessage = (e) => {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+
+      if (!settled) {
+        if (msg.type === "join_success") {
+          settled = true;
+          clearTimeout(timeout);
+          resolve();
+        } else if (msg.type === "no_host") {
+          settled = true;
+          clearTimeout(timeout);
+          teardown();
+          reject(new Error("Invalid room code or host is offline."));
+          return;
+        }
+      }
+
+      handleSignal(msg);
+    };
+
+    ws.onclose = () => {
+      notifyStatus();
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        reject(new Error("Failed to connect to signaling server."));
+      } else if (roomCode) {
+        setTimeout(connectSignaling, 2000);
+      }
+    };
+
+    ws.onerror = () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        reject(new Error("WebSocket error connecting to server."));
+      }
+    };
+  });
 }
 
 function sendSignal(to, data) {
@@ -77,14 +108,15 @@ function handleSignal(msg) {
     pendingCandidates.delete(msg.from);
     notifyStatus();
   } else if (msg.type === "host_left" && role === "peer") {
-    teardownConnections();
+    teardown();
+    chrome.runtime.sendMessage({ target: "background", type: "clear_session" }).catch(() => {});
     notifyStatus("host_left");
   } else if (msg.type === "no_host" && role === "peer") {
+    teardown();
+    chrome.runtime.sendMessage({ target: "background", type: "clear_session" }).catch(() => {});
     notifyStatus("no_host");
   }
 }
-
-// ---- Host: one RTCPeerConnection per joined peer ----
 
 function createHostConnection(peerId) {
   const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
@@ -150,11 +182,7 @@ function toCatchupState(state) {
 
 function handleHostChannelMessage(peerId, raw) {
   let msg;
-  try {
-    msg = JSON.parse(raw);
-  } catch {
-    return;
-  }
+  try { msg = JSON.parse(raw); } catch { return; }
   if (msg.type === "state") {
     lastState = msg;
     relayToOtherPeers(peerId, raw);
@@ -172,8 +200,6 @@ function relayToOtherPeers(excludePeerId, raw) {
     if (pid !== excludePeerId && ch.readyState === "open") ch.send(raw);
   }
 }
-
-// ---- Peer: single RTCPeerConnection, to the host ----
 
 function handlePeerSignal(data) {
   if (data.sdp && data.sdp.type === "offer") {
@@ -218,11 +244,7 @@ function setupPeerChannel(channel) {
 
 function handlePeerChannelMessage(raw) {
   let msg;
-  try {
-    msg = JSON.parse(raw);
-  } catch {
-    return;
-  }
+  try { msg = JSON.parse(raw); } catch { return; }
   if (msg.type === "room_info") {
     if (msg.url) navigateSyncedTab(msg.url, msg.lastState);
   } else if (msg.type === "navigate") {
@@ -231,8 +253,6 @@ function handlePeerChannelMessage(raw) {
     applyToTab(msg);
   }
 }
-
-// ---- Tab Control via Background ----
 
 function applyToTab(state) {
   chrome.runtime.sendMessage({ target: "background", type: "tabs_apply_state", payload: state }).catch(() => {});
@@ -262,8 +282,6 @@ function toStateMessage(captured) {
   };
 }
 
-// ---- Lifecycle ----
-
 function teardown() {
   roomCode = null;
   role = null;
@@ -271,9 +289,7 @@ function teardown() {
   lastState = null;
   teardownConnections();
   if (ws) {
-    try {
-      ws.close();
-    } catch {}
+    try { ws.close(); } catch {}
     ws = null;
   }
 }
@@ -293,8 +309,6 @@ function teardownConnections() {
 function notifyStatus(reason) {
   chrome.runtime.sendMessage({ type: "status", reason }).catch(() => {});
 }
-
-// ---- Message Handlers ----
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "local_state") {
@@ -321,12 +335,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     roomCode = message.roomCode;
     role = message.role;
     deviceId = message.deviceId;
-    if (message.serverUrl) {
-      signalUrl = message.serverUrl;
-    }
-    connectSignaling();
-    sendResponse({ ok: true });
-    return;
+    if (message.serverUrl) signalUrl = message.serverUrl;
+
+    connectSignaling()
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
   }
 
   if (message.type === "stop") {

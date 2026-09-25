@@ -1,6 +1,4 @@
-// background.js
-// Owns storage, tab access, offscreen document lifecycle, and message routing.
-
+// extension/background.js
 const OFFSCREEN_PATH = "offscreen.html";
 const SIGNAL_SERVER_URL = "wss://watchsync-server-vvcc.onrender.com";
 
@@ -12,13 +10,10 @@ const PAIRING_MESSAGE_TYPES = new Set([
   "get_status"
 ]);
 
-let syncedTabId = null; // The tab treated as the synced player
+let syncedTabId = null;
 
-// Clean up stale tab IDs when tabs are closed
 chrome.tabs.onRemoved.addListener((tabId) => {
-  if (tabId === syncedTabId) {
-    syncedTabId = null;
-  }
+  if (tabId === syncedTabId) syncedTabId = null;
 });
 
 restoreIfNeeded();
@@ -65,7 +60,6 @@ async function ensureOffscreenDocument() {
   });
 }
 
-// Retries messaging offscreen script to prevent race conditions during document spin-up
 async function sendToOffscreenWithRetry(message, retries = 5, delay = 100) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -77,8 +71,6 @@ async function sendToOffscreenWithRetry(message, retries = 5, delay = 100) {
   }
 }
 
-// ---- Tab Control ----
-
 async function getActiveTab() {
   const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   return tabs[0] || null;
@@ -88,7 +80,6 @@ async function applyToSyncedTab(state) {
   const tab = syncedTabId ? { id: syncedTabId } : await getActiveTab();
   if (!tab || !tab.id) return;
   chrome.tabs.sendMessage(tab.id, { type: "remote_state", payload: state }).catch(() => {
-    // Fall back to active tab if sending to syncedTabId failed
     if (syncedTabId) {
       syncedTabId = null;
       getActiveTab().then((activeTab) => {
@@ -105,9 +96,7 @@ async function navigateSyncedTab(url, pendingState) {
   if (!tab || !tab.id) return;
   syncedTabId = tab.id;
 
-  if (tab.url === url) {
-    return;
-  }
+  if (tab.url === url) return;
 
   const listener = (tabId, changeInfo) => {
     if (tabId === tab.id && changeInfo.status === "complete") {
@@ -125,8 +114,6 @@ function applyOnceReady(tabId, state) {
   }, 1500);
 }
 
-// ---- Message Routing ----
-
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "local_state") {
     if (sender.tab) syncedTabId = sender.tab.id;
@@ -134,6 +121,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.target === "background") {
+    if (message.type === "clear_session") {
+      chrome.storage.local.remove(["roomCode", "role"]);
+      return;
+    }
     if (message.type === "tabs_get_active_url") {
       (async () => {
         const tab = await getActiveTab();
@@ -151,9 +142,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         let state = null;
         try {
           state = await chrome.tabs.sendMessage(tab.id, { type: "get_current_state" });
-        } catch {
-          // Content script not ready on this tab
-        }
+        } catch {}
         sendResponse({ url: tab.url, state: state || null });
       })();
       return true;
@@ -180,9 +169,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.type === "create_room") {
         const deviceId = await getOrCreateDeviceId();
         const roomCode = generateRoomCode();
-        await chrome.storage.local.set({ roomCode, role: "host" });
         await ensureOffscreenDocument();
-        await sendToOffscreenWithRetry({
+
+        const res = await sendToOffscreenWithRetry({
           target: "offscreen",
           type: "begin",
           roomCode,
@@ -190,16 +179,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           deviceId,
           serverUrl: SIGNAL_SERVER_URL
         });
-        sendResponse({ roomCode });
+
+        if (res && res.ok) {
+          await chrome.storage.local.set({ roomCode, role: "host" });
+          sendResponse({ roomCode });
+        } else {
+          sendResponse({ error: res?.error || "Failed to create room" });
+        }
         return;
       }
 
       if (message.type === "join_room") {
         const deviceId = await getOrCreateDeviceId();
         const roomCode = message.roomCode;
-        await chrome.storage.local.set({ roomCode, role: "peer" });
         await ensureOffscreenDocument();
-        await sendToOffscreenWithRetry({
+
+        const res = await sendToOffscreenWithRetry({
           target: "offscreen",
           type: "begin",
           roomCode,
@@ -207,7 +202,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           deviceId,
           serverUrl: SIGNAL_SERVER_URL
         });
-        sendResponse({ ok: true });
+
+        if (res && res.ok) {
+          await chrome.storage.local.set({ roomCode, role: "peer" });
+          sendResponse({ ok: true });
+        } else {
+          sendResponse({ ok: false, error: res?.error || "Invalid room code or host is offline." });
+        }
         return;
       }
 
