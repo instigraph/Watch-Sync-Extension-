@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>WatchSync</title>
+  <style>
+    body {
+      font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+      width: 260px;
+      padding: 16px;
+      margin: 0;
+    }
+    h1 { font-size: 15px; margin: 0 0 12px; }
+    .status { font-size: 12px; color: #666; margin-bottom: 12px; }
+    .status.connected { color: #1a7f37; }
+    button {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 8px;
+      border: none;
+      border-radius: 6px;
+      background: #2563eb;
+      color: white;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    button.secondary { background: #eee; color: #333; }
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px;
+      margin-bottom: 8px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 14px;
+      letter-spacing: 2px;
+      text-align: center;
+    }
+    .code-display {
+      font-size: 28px;
+      letter-spacing: 4px;
+      text-align: center;
+      font-weight: bold;
+      padding: 12px 0;
+      background: #f3f4f6;
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>WatchSync</h1>
+  <div id="status" class="status">Not connected</div>
+  <div id="roomView" style="display:none;">
+    <div class="code-display" id="roomCode"></div>
+    <hr style="border:none;border-top:1px solid #eee;margin:10px 0;" />
+    <div style="font-size:12px;color:#666;margin-bottom:6px;">Common stream</div>
+    <button class="secondary" id="useCurrentTabBtn">Sync Room to This Tab</button>
+    <input id="streamUrlInput" style="letter-spacing:normal;text-align:left;" placeholder="or paste a URL" />
+    <button id="setStreamBtn">Send URL to Room</button>
+    <div style="font-size:11px;color:#999;margin:6px 0 10px;">
+      Shortcuts: Alt+Shift+P play/pause · Alt+Shift+← / → seek 10s
+    </div>
+    <div id="hostWarning" style="font-size:11px;color:#b45309;margin-bottom:8px;display:none;">
+      You're hosting — leaving or closing this browser ends the room for everyone.
+    </div>
+    <button class="secondary" id="leaveBtn">Leave Room</button>
+  </div>
+  <div id="pairView">
+    <button id="createBtn">Create Room</button>
+    <input id="joinInput" placeholder="Enter 6-digit code" maxlength="6" />
+    <button id="joinBtn" class="secondary">Join Room</button>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

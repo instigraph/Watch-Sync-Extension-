@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "WatchSync",
+  "version": "0.1.0",
+  "description": "Sync video playback across streaming sites between paired devices, peer-to-peer.",
+  "permissions": ["storage", "scripting", "tabs", "offscreen"],
+  "host_permissions": ["*://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "commands": {
+    "toggle-play-pause": {
+      "suggested_key": { "default": "Alt+Shift+P" },
+      "description": "WatchSync: play/pause (synced to room)"
+    },
+    "seek-forward-10": {
+      "suggested_key": { "default": "Alt+Shift+Right" },
+      "description": "WatchSync: seek forward 10s (synced to room)"
+    },
+    "seek-back-10": {
+      "suggested_key": { "default": "Alt+Shift+Left" },
+      "description": "WatchSync: seek back 10s (synced to room)"
+    }
+  }
+}

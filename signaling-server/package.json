@@ -1,0 +1,12 @@
+{
+  "name": "watchsync-signaling",
+  "version": "0.2.0",
+  "description": "WebRTC handshake broker for WatchSync — no room state or playback data passes through it.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
